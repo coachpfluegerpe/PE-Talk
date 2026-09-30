@@ -4,7 +4,7 @@
 </style></head><body><main><header><div><h1>PE Talk</h1><p>What do you need? Touch a picture to make your message.</p></div><div><button id="full">Full screen</button> <button id="settingsButton" aria-expanded="false">Staff settings</button></div></header>
 <section class="phrase" aria-label="Your message"><div class="message" id="message" aria-live="polite">Your message goes here</div><div class="controls"><button class="speak" id="speak">🔊 Speak</button><button id="repeat">↻ Repeat</button><button id="back">⌫ Back</button><button id="clear">Clear</button></div><div class="status" id="status" role="status"></div></section>
 <h2>Quick needs · touch once to speak</h2><div class="quick" id="quick"></div><nav class="tabs" aria-label="Word groups" id="tabs"></nav><div class="grid" id="grid"></div>
-<section class="settings" id="settings" hidden><h2>Staff settings</h2><label>Voice <select id="voice"><option value="">Device default</option></select></label><label>Speaking speed <input id="rate" type="range" min="0.6" max="1.2" step="0.1" value="0.9"></label><label><input type="checkbox" id="auto"> Speak each picture when touched</label><p>Quick needs always speak immediately and replace the message. Other pictures build the message. Back removes the last picture; Clear starts a new message.</p><p>For sound, turn up the computer and display speakers. Voice availability depends on the browser and device.</p></section><footer>Gym communication board · Keep the student's familiar communication system available.</footer></main>
+<section class="settings" id="settings" hidden><h2>Staff settings</h2><button id="testVoice">🔊 Test voice</button><p>If you are viewing this inside ClassroomScreen, open PE Talk in its own browser tab to test sound.</p><label>Voice <select id="voice"><option value="">Device default</option></select></label><label>Speaking speed <input id="rate" type="range" min="0.6" max="1.2" step="0.1" value="0.9"></label><label><input type="checkbox" id="auto"> Speak each picture when touched</label><p>Quick needs always speak immediately and replace the message. Other pictures build the message. Back removes the last picture; Clear starts a new message.</p><p>For sound, turn up the computer and display speakers. Voice availability depends on the browser and device.</p></section><footer>Gym communication board · Keep the student's familiar communication system available.</footer></main>
 <script>
 'use strict';
 const groups={
@@ -19,13 +19,42 @@ const quick=[['🤝','Help','Help, please'],['🚻','Bathroom','I need the bathr
 let parts=[],last='',category='Needs'; const $=id=>document.getElementById(id);
 function phrase(){let s='';for(const p of parts){if(!s)s=p[2];else if(/^(I need|I want)$/.test(s)&&!/^I |^Please |^It |^Can |^Thank |^Yes$|^No$/.test(p[2]))s+=' '+p[2];else s+=(/[.!?]$/.test(s)?' ':'. ')+p[2];}return s;}
 function update(){ $('message').textContent=phrase()||'Your message goes here'; }
-function speak(s){if(!s)return;if(!('speechSynthesis' in window)){ $('status').textContent='Voice is unavailable in this browser. Your message is shown above.';return;}speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(s);u.lang='en-US';u.rate=Number($('rate').value);const v=speechSynthesis.getVoices().find(v=>v.voiceURI===$('voice').value);if(v)u.voice=v;u.onerror=()=>{$('status').textContent='Sound could not play. Check the browser voice and speakers.'};u.onstart=()=>{$('status').textContent='Speaking…'};u.onend=()=>{$('status').textContent=''};last=s;speechSynthesis.speak(u);}
+let activeSpeech=null, speechId=0;
+function speak(s){
+ if(!s){$('status').textContent='Touch a picture first, then press Speak.';return;}
+ if(!('speechSynthesis' in window)||typeof SpeechSynthesisUtterance==='undefined'){$('status').textContent='Voice is unavailable here. Open PE Talk directly in Safari or Chrome.';return;}
+ const synth=window.speechSynthesis,id=++speechId;
+ if(synth.speaking||synth.pending)synth.cancel();
+ synth.resume();
+ last=s;
+ const available=synth.getVoices(),selected=available.find(v=>v.voiceURI===$('voice').value);
+ const local=available.find(v=>v.localService&&/^en[-_]US/i.test(v.lang))||available.find(v=>v.localService&&/^en/i.test(v.lang));
+ const preferred=selected||local||available.find(v=>/^en/i.test(v.lang));
+ function start(voice,retried){
+  if(id!==speechId)return;
+  const u=new SpeechSynthesisUtterance(s);activeSpeech=u;
+  if(voice){u.voice=voice;u.lang=voice.lang;}else u.lang='en-US';
+  u.rate=Number($('rate').value);u.volume=1;
+  u.onstart=()=>{if(id===speechId)$('status').textContent='Speaking…'};
+  u.onend=()=>{if(id===speechId){$('status').textContent='';activeSpeech=null;}};
+  u.onerror=e=>{
+   if(id!==speechId||e.error==='canceled'||e.error==='interrupted')return;
+   if(!retried&&['voice-unavailable','language-unavailable','network','synthesis-failed'].includes(e.error)){start(local&&local!==voice?local:null,true);return;}
+   const tips={'not-allowed':'Open PE Talk in its own browser tab and press Test voice.', 'audio-hardware':'Check the computer sound output and connected speakers.', 'audio-busy':'Close other apps using audio, then try again.', 'synthesis-unavailable':'Choose an installed English voice in your device speech settings.', 'network':'Choose an installed device voice in Staff settings.', 'voice-unavailable':'Choose another voice in Staff settings.', 'language-unavailable':'Install an English voice on this device.', 'synthesis-failed':'Try another voice in Staff settings or open the app in Safari.'};
+   $('status').textContent='Voice error ('+(e.error||'unknown')+'). '+(tips[e.error]||'Try Test voice in Staff settings.');activeSpeech=null;
+  };
+  try{synth.speak(u);}catch(e){$('status').textContent='Voice could not start. Open PE Talk directly in Safari or Chrome and try Test voice.';activeSpeech=null;}
+ }
+ start(preferred,false);
+}
+
 function tile(p,urgent){const b=document.createElement('button');b.className='tile'+(p[3]?' starter':'');const icon=document.createElement('span');icon.className='icon';icon.setAttribute('aria-hidden','true');if(p[1]==='Floor scooter')icon.innerHTML=scooter;else icon.textContent=p[0];const label=document.createElement('span');label.textContent=p[1];b.append(icon,label);b.onclick=()=>{if(urgent){parts=[p];update();speak(p[2]);}else{if(p[3])parts=[p];else parts.push(p);update();if($('auto').checked)speak(p[2]);}};return b;}
 function render(){ $('grid').replaceChildren(...groups[category].map(p=>tile(p,false)));for(const b of $('tabs').children)b.setAttribute('aria-pressed',String(b.textContent===category));}
 $('quick').append(...quick.map(p=>tile(p,true)));for(const name of Object.keys(groups)){const b=document.createElement('button');b.textContent=name;b.onclick=()=>{category=name;render()};$('tabs').append(b)}render();
-$('speak').onclick=()=>speak(phrase());$('repeat').onclick=()=>speak(last||phrase());$('back').onclick=()=>{parts.pop();update()};$('clear').onclick=()=>{parts=[];update();if('speechSynthesis'in window)speechSynthesis.cancel();$('status').textContent=''};
+$('testVoice').onclick=()=>speak('PE Talk is ready. I can speak.');
+$('speak').onclick=()=>speak(phrase());$('repeat').onclick=()=>speak(last||phrase());$('back').onclick=()=>{parts.pop();update()};$('clear').onclick=()=>{parts=[];update();speechId++;activeSpeech=null;if('speechSynthesis'in window)speechSynthesis.cancel();$('status').textContent=''};
 $('settingsButton').onclick=()=>{const open=$('settings').hidden;$('settings').hidden=!open;$('settingsButton').setAttribute('aria-expanded',String(open));};
 $('full').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch(e){$('status').textContent='Use your browser full screen command.'}};
-function voices(){if(!('speechSynthesis'in window))return;const current=$('voice').value;$('voice').replaceChildren(new Option('Device default',''));for(const v of speechSynthesis.getVoices().filter(v=>v.lang.startsWith('en'))) $('voice').append(new Option(v.name+' ('+v.lang+')',v.voiceURI));$('voice').value=current;}
+function voices(){if(!('speechSynthesis'in window))return;const current=$('voice').value;$('voice').replaceChildren(new Option('Automatic · prefer installed English voice',''));for(const v of speechSynthesis.getVoices().filter(v=>v.lang.startsWith('en'))) $('voice').append(new Option(v.name+' ('+v.lang+')'+(v.localService?' · device voice':' · online voice'),v.voiceURI));$('voice').value=current;}
 if('speechSynthesis'in window){voices();speechSynthesis.addEventListener('voiceschanged',voices)}
 </script></body></html>
